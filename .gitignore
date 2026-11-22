@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+app/config.conf
+app/logs/
+*.log
+backups/
+evidence/
+runtime/
+
+# FORGE release hygiene
+*.backup_*
+tests/nexus/

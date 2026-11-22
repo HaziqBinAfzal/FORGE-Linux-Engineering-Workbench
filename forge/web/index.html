@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FORGE — Linux Engineering Workbench</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">F</div>
+      <div><strong>FORGE</strong><small>ENGINEERING WORKBENCH</small></div>
+    </div>
+    <div class="nav-label">WORKSPACE</div>
+    <nav>
+      <a class="active" href="#overview">◈ &nbsp; Overview</a>
+      <a href="#processes">▤ &nbsp; Processes</a>
+      <a href="#engineering">◇ &nbsp; Engineering</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <span class="status-dot"></span> LOCAL ENVIRONMENT
+      <p>Read-only diagnostic mode</p>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <span>WORKSPACE <b>/</b> OVERVIEW</span>
+      <span id="connection" class="connection">Connecting...</span>
+    </header>
+
+    <section class="hero" id="overview">
+      <div>
+        <div class="eyebrow">LINUX OPERATIONS / LOCAL NODE</div>
+        <h1>Engineering clarity.<br><em>Operational confidence.</em></h1>
+        <p>Inspect your environment, understand resource pressure, and make informed engineering decisions.</p>
+      </div>
+      <div class="hero-mark">F<span>.</span></div>
+    </section>
+
+    <section class="section-heading">
+      <div><span class="eyebrow">01 / LIVE TELEMETRY</span><h2>System health</h2></div>
+      <span class="updated" id="updated">Waiting for telemetry</span>
+    </section>
+
+    <section class="metrics">
+      <article class="metric">
+        <div class="metric-label">PROCESSOR <span>01</span></div>
+        <div class="metric-value" id="cpu">—</div>
+        <div class="meter"><div id="cpu-bar"></div></div>
+        <div class="metric-foot" id="cores">Logical cores —</div>
+      </article>
+      <article class="metric">
+        <div class="metric-label">MEMORY <span>02</span></div>
+        <div class="metric-value" id="memory">—</div>
+        <div class="meter"><div id="memory-bar"></div></div>
+        <div class="metric-foot" id="memory-detail">Usage unavailable</div>
+      </article>
+      <article class="metric">
+        <div class="metric-label">STORAGE <span>03</span></div>
+        <div class="metric-value" id="disk">—</div>
+        <div class="meter"><div id="disk-bar"></div></div>
+        <div class="metric-foot" id="disk-detail">Usage unavailable</div>
+      </article>
+    </section>
+
+    <section class="content-grid">
+      <article class="panel">
+        <div class="panel-head"><div><span class="eyebrow">02 / NODE PROFILE</span><h2>Environment</h2></div><span class="tag">LOCAL</span></div>
+        <div class="detail-row"><span>Hostname</span><strong id="hostname">—</strong></div>
+        <div class="detail-row"><span>Operating system</span><strong id="platform">—</strong></div>
+        <div class="detail-row"><span>Kernel</span><strong id="kernel">—</strong></div>
+        <div class="detail-row"><span>Uptime</span><strong id="uptime">—</strong></div>
+        <div class="detail-row"><span>Running processes</span><strong id="process-count">—</strong></div>
+      </article>
+
+      <article class="panel" id="engineering">
+        <div class="panel-head"><div><span class="eyebrow">03 / ENGINEERING</span><h2>Workbench</h2></div><span class="tag">ROADMAP</span></div>
+        <div class="work-item"><span class="work-num">01</span><div><strong>System diagnostics</strong><small>Live resource and process inspection</small></div><span class="ready">READY</span></div>
+        <div class="work-item"><span class="work-num">02</span><div><strong>Configuration drift</strong><small>Baseline comparison and change detection</small></div><span class="planned">PLANNED</span></div>
+        <div class="work-item"><span class="work-num">03</span><div><strong>Deployment readiness</strong><small>Preflight validation and verification</small></div><span class="planned">PLANNED</span></div>
+        <div class="work-item"><span class="work-num">04</span><div><strong>Repair missions</strong><small>Guided Linux troubleshooting</small></div><span class="planned">PLANNED</span></div>
+      </article>
+    </section>
+
+    <section class="panel processes" id="processes">
+      <div class="panel-head"><div><span class="eyebrow">04 / PROCESS INSPECTION</span><h2>Memory-intensive processes</h2></div><span class="tag">LIVE</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>PROCESS</th><th>PID</th><th>CPU</th><th>MEMORY</th></tr></thead>
+          <tbody id="process-table"><tr><td colspan="4">Loading processes...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>FORGE / LINUX ENGINEERING WORKBENCH <span>LOCAL DEVELOPMENT · READ-ONLY</span></footer>
+  </main>
+</div>
+<script src="/static/app.js" defer></script>
+</body>
+</html>
