@@ -44,27 +44,62 @@ def system_snapshot():
     }
 
 
+from time import monotonic as _process_clock
+
+# Cached CPU times allow meaningful nonblocking per-process CPU rates.
+# The first observation is a baseline, not an estimate of activity.
+_PROCESS_CPU_PREVIOUS = {}
+_PROCESS_CPU_TIME = None
+
+
 def top_processes(limit=8):
+    """Return memory-ranked processes with measured per-process CPU usage.
+
+    CPU% is relative to one logical CPU, matching psutil's process convention.
+    The first sample (or a newly observed process) reports 0 until the next poll.
+    PID reuse is guarded by process creation time; disappeared PIDs are purged.
+    """
+    global _PROCESS_CPU_PREVIOUS, _PROCESS_CPU_TIME
+
+    now = _process_clock()
+    elapsed = None if _PROCESS_CPU_TIME is None else now - _PROCESS_CPU_TIME
+    current = {}
     processes = []
 
     for proc in psutil.process_iter(
-        ["pid", "name", "cpu_percent", "memory_percent"]
+        ["pid", "name", "memory_percent", "cpu_times", "create_time"]
     ):
         try:
             info = proc.info
+            pid = info["pid"]
+            times = info.get("cpu_times")
+            created = info.get("create_time")
+            if times is None:
+                continue
+            used = float(times.user + times.system)
+            previous = _PROCESS_CPU_PREVIOUS.get(pid)
+            percent = 0.0
+            if (
+                previous is not None
+                and previous[0] == created
+                and elapsed is not None
+                and elapsed > 0
+            ):
+                percent = max(0.0, (used - previous[1]) / elapsed * 100)
+            current[pid] = (created, used)
             processes.append({
-                "pid": info["pid"],
-                "name": info["name"] or "unknown",
-                "cpu_percent": info["cpu_percent"] or 0,
-                "memory_percent": round(
-                    info["memory_percent"] or 0, 2
-                ),
+                "pid": pid,
+                "name": info.get("name") or "unknown",
+                "cpu_percent": round(percent, 1),
+                "memory_percent": round(info.get("memory_percent") or 0, 2),
             })
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except (psutil.NoSuchProcess, psutil.AccessDenied, TypeError, ValueError):
             continue
 
+    _PROCESS_CPU_PREVIOUS = current
+    _PROCESS_CPU_TIME = now
     return sorted(
         processes,
         key=lambda item: item["memory_percent"],
         reverse=True,
-    )[:limit]
+    )[:max(0, int(limit))]

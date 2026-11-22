@@ -12,7 +12,7 @@ An interactive, safety-conscious Linux learning environment combining a guided C
 ![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20WSL-20232A?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-22C55E)
-![Tests](https://img.shields.io/badge/Tests-70%20passing-16A34A)
+![Tests](https://img.shields.io/badge/Tests-96%20passing-16A34A)
 
 [Overview](#overview) · [Capabilities](#what-forge-can-do) · [Quick start](#quick-start) · [CLI reference](#linux-command-reference) · [Guided mission](#the-six-step-web-app-setup-mission) · [Architecture](#architecture) · [Safety](#designed-for-safe-learning)
 
@@ -77,6 +77,8 @@ Rather than presenting a static cheat sheet, FORGE brings together three complem
 
 ## Workspaces inside FORGE
 
+The four primary workspaces use shortcuts `1`–`4`. Additional tools remain accessible through `5` (Drift), `6` (Preflight), and `7` (incident practice).
+
 FORGE provides a terminal-oriented experience with dedicated engineering views. The primary training experience is an **interactive command input**: enter a supported command, inspect the output, and advance your mission as the required evidence is created.
 
 | Workspace | What you can explore |
@@ -84,11 +86,11 @@ FORGE provides a terminal-oriented experience with dedicated engineering views. 
 | **Overview** | Entry point for system and workbench context. |
 | **Processes** | Process-oriented monitoring views. |
 | **Diagnostics** | Inspect operational signals and troubleshooting information. |
-| **Engineering** | Work through troubleshooting exercises and supporting workflows. |
+| **Engineering** | Practice Linux commands in the isolated lab and complete the six-step DecodeLabs mission. |
 | **Drift** | Examine changes or deviations in the monitored environment. |
 | **Preflight** | Review preflight-style checks and readiness information. |
-| **Missions** | Follow structured exercises and track completion. |
-| **Linux lab** | Practice supported filesystem commands in a safe training environment. |
+| **Missions** | Access optional incident practice using shortcut `7`. |
+| **Linux lab** | Integrated into Engineering (`4`), rather than a separate main workspace. |
 
 ### The project at a glance
 
@@ -158,7 +160,7 @@ The launcher starts the project's terminal interface. **Use the command input in
 PYTHONPATH=. .venv/bin/python -m pytest tests/forge -q
 ```
 
-**Verified release baseline:** 70 passing tests, including a fresh-virtual-environment installation check. GitHub Actions runs the FORGE suite on pushes and pull requests.
+**Verified release baseline:** 96 passing tests, including a fresh-virtual-environment installation check. GitHub Actions runs the FORGE suite on pushes and pull requests.
 
 ---
 
@@ -339,7 +341,7 @@ FORGE intentionally favors **teachable, bounded behavior** over pretending to be
 
 | Check | Release verification |
 |:--|:--|
-| Automated FORGE suite | **70 tests passed** |
+| Automated FORGE suite | **96 tests passed** |
 | Clean Python virtual environment | **Dependencies installed and test suite passed** |
 | GitHub Actions | **Initial and documentation-update workflows passed** |
 | Source availability | **Versioned Git repository** |
