@@ -2,6 +2,10 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Static, DataTable, Footer, Input
 from forge.services.telemetry import system_snapshot, top_processes
+from forge.services.live_monitor import LiveMonitor
+from forge.tui.ops_graphs import braille_chart, format_rate, DiskRates, AlertJournal, adaptive_ceiling, compact_plot
+import psutil
+from collections import deque
 from forge.services.drift import create_baseline, check_drift
 from forge.services.preflight import run_preflight
 from forge.services.missions import inspect_mission, verify_diagnosis, list_missions
@@ -9,111 +13,63 @@ from forge.services.linux_lab import LinuxLab
 from forge.services.webapp_mission import verify_webapp_setup
 
 
+def core_activity(core_usage, width):
+    """Compact honest per-core activity; never manufactures samples."""
+    samples = list(core_usage)
+    if not samples:
+        return "Per-core telemetry unavailable"
+    # Each cell has a per-core index and measured percentage.
+    columns = max(2, min(6, int(width) // 16))
+    output = ["[#848F86]PER-CORE CPU  /  LIVE UTILIZATION[/]"]
+    for offset in range(0, len(samples), columns):
+        row = []
+        for index in range(offset, min(len(samples), offset + columns)):
+            usage = max(0.0, min(100.0, float(samples[index])))
+            glyph = "▁▂▃▄▅▆▇█"[min(7, int(usage * 8 / 100))] if usage >= 1 else "·"
+            row.append(f"{index:02} {glyph} {usage:>4.0f}%")
+        output.append("   ".join(row))
+    return "\n".join(output)
+
+
 class ForgeApp(App):
     TITLE = "FORGE"
 
     CSS = """
-    Screen {
-        background: #0A0A0A;
-        color: #E8E8E8;
-    }
-
-    #shell {
-        height: 1fr;
-        padding: 1 2;
-    }
-
-    #brand {
-        height: 3;
-        color: #FFFFFF;
-        text-style: bold;
-        content-align: left middle;
-    }
-
-    #nav {
-        height: 3;
-        border-bottom: solid #303030;
-        color: #909090;
-    }
-
-    #heading {
-        height: 4;
-        padding-top: 1;
-        color: #FFFFFF;
-        text-style: bold;
-    }
-
-    #metrics {
-        height: 10;
-    }
-
-    .metric {
-        width: 1fr;
-        margin-right: 1;
-        background: #141414;
-        border: solid #252525;
-        padding: 1 2;
-    }
-
-    .metric-label {
-        color: #888888;
-        text-style: bold;
-    }
-
-    .metric-value {
-        color: #FFFFFF;
-        text-style: bold;
-        padding-top: 1;
-    }
-
-    .metric-bar {
-        color: #BDBDBD;
-        padding-top: 1;
-    }
-
-    #details {
-        height: 13;
-        background: #141414;
-        border: solid #252525;
-        padding: 1 2;
-        margin-top: 1;
-    }
-
-    #table {
-        height: 1fr;
-        background: #141414;
-    }
-
-    #console-scroll {
-        height: 1fr;
-        min-height: 5;
-        background: #141414;
-        border: solid #252525;
-        padding: 1 2;
-        overflow-y: auto;
-    }
-
-    #console {
-        height: auto;
-        width: 100%;
-        background: #141414;
-    }
-
-    #status {
-        height: 2;
-        color: #888888;
-        padding-top: 1;
-    }
-
-    Footer {
-        background: #141414;
-        color: #BDBDBD;
-    }
-
-    DataTable {
-        background: #141414;
-        color: #E8E8E8;
-    }
+    Screen { background: #050505; color: #E7E7E4; }
+    #shell { height: 1fr; background: #050505; padding: 0 1; }
+    #brand { height: 1; padding: 0 1; color: #F1F1EE; text-style: bold; content-align: left middle; }
+    #nav { height: 2; padding: 0 1; border-bottom: solid #242424; color: #777777; }
+    #heading { height: 1; padding: 0 1; color: #EAEAE7; text-style: bold; content-align: left middle; }
+    #health { height: 1; padding: 0 1; color: #8E9A90; }
+    #metrics { height: 3; margin: 0; }
+    .metric { width: 1fr; margin-right: 1; padding: 0 2; background: #101010; }
+    .metric-label { height: 1; color: #989898; }
+    .metric-value { height: 1; color: #F4F4F0; text-style: bold; }
+    #overview-body { height: 1fr; min-height: 10; margin-top: 0; }
+    #graph-area { height: 12; min-height: 10; max-height: 14; }
+    #cpu-area { width: 2fr; background: #090909; margin-right: 1; padding: 0 1; }
+    #cpu-plot { height: 4; }
+    #cpu-cores { height: 1fr; min-height: 3; color: #A8B6A8; padding: 0 1; }
+    #graph-side { width: 1fr; }
+    .small-graph { height: 1fr; min-height: 2; background: #0B0B0B; padding: 0 1; }
+    #memory-area { margin-bottom: 1; }
+    .panel-title { height: 1; color: #DEDEDC; text-style: bold; padding: 0 1; }
+    .plot { height: 1fr; width: 100%; color: #9CB6A5; padding: 0 1; }
+    #overview-bottom { height: 1fr; min-height: 8; margin-top: 1; }
+    #process-panel { width: 2fr; margin-right: 1; background: #0D0D0D; padding: 0 2; }
+    #incident-panel { width: 1fr; background: #0D0D0D; padding: 0 2; }
+    #details { height: auto; color: #C1C7C1; }
+    #live-feed { height: auto; color: #C1C7C1; }
+    #ticker { height: 1; padding: 0 1; color: #989F99; }
+    #table { height: 1fr; background: #080808; }
+    #console-scroll { height: 1fr; min-height: 5; background: #080808; border: none; padding: 1 2; overflow-y: auto; }
+    #console { height: auto; width: 100%; background: #080808; color: #E1E1DC; }
+    #lab-input { background: #101010; color: #E7E7E4; border: none; border-bottom: solid #414A42; }
+    #lab-input:focus { border-bottom: solid #96B39E; }
+    #status { height: 1; padding: 0 1; color: #777777; }
+    Footer { display: none; }
+    DataTable { background: #080808; color: #DADAD6; }
+    DataTable > .datatable--header { background: #151515; color: #B1BAAF; }
     """
 
     BINDINGS = [
@@ -139,43 +95,42 @@ class ForgeApp(App):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
-            yield Static(
-                "F O R G E   /   LINUX ENGINEERING WORKSTATION",
-                id="brand",
-            )
-
-            yield Static(
-                "01  OVERVIEW     02  PROCESSES     "
-                "03  DIAGNOSTICS     04  ENGINEERING     05  DRIFT     06  PREFLIGHT",
-                id="nav",
-            )
-
-            yield Static("SYSTEM OVERVIEW", id="heading")
-
+            yield Static("FORGE  /  LINUX OPERATIONS", id="brand")
+            yield Static("", id="nav")
+            yield Static("MONITOR  /  SYSTEM PERFORMANCE", id="heading")
+            yield Static("Host measurements  ·  read only", id="health")
             with Horizontal(id="metrics"):
-                for key, label in (
-                    ("cpu", "CPU LOAD"),
-                    ("memory", "MEMORY"),
-                    ("disk", "STORAGE"),
-                ):
+                for key, label in (("cpu", "CPU"), ("memory", "MEMORY"),
+                                   ("disk", "DISK CAPACITY"), ("network", "NETWORK / RX")):
                     with Vertical(classes="metric"):
                         yield Static(label, classes="metric-label")
-                        yield Static("—", id=f"{key}-value", classes="metric-value")
-                        yield Static("░" * 20, id=f"{key}-bar", classes="metric-bar")
-
-            yield Static("Loading node profile...", id="details")
-
+                        yield Static("Collecting", id=f"{key}-value", classes="metric-value")
+            with Vertical(id="overview-body"):
+                with Horizontal(id="graph-area"):
+                    with Vertical(id="cpu-area"):
+                        yield Static("CPU ACTIVITY", id="cpu-chart-heading", classes="panel-title")
+                        yield Static("Sampling CPU history…", id="cpu-plot", classes="plot")
+                        yield Static("Sampling per-core activity…", id="cpu-cores")
+                    with Vertical(id="graph-side"):
+                        with Vertical(id="memory-area", classes="small-graph"):
+                            yield Static("MEMORY", id="memory-chart-heading", classes="panel-title")
+                            yield Static("Sampling memory…", id="memory-plot", classes="plot")
+                        with Vertical(id="network-area", classes="small-graph"):
+                            yield Static("NETWORK I/O", id="network-chart-heading", classes="panel-title")
+                            yield Static("Sampling network…", id="network-plot", classes="plot")
+                with Horizontal(id="overview-bottom"):
+                    with Vertical(id="process-panel"):
+                        yield Static("LIVE PROCESSES", classes="panel-title")
+                        yield Static("Collecting processes…", id="details")
+                    with Vertical(id="incident-panel"):
+                        yield Static("HEALTH & EVENTS", classes="panel-title")
+                        yield Static("Collecting resource state…", id="live-feed")
+            yield Static("SAMPLING HOST TELEMETRY", id="ticker")
             yield DataTable(id="table")
-
             with VerticalScroll(id="console-scroll"):
                 yield Static("", id="console")
-            yield Input(
-                placeholder="Enter a Linux command, then press Enter...",
-                id="lab-input",
-            )
-
-            yield Static("LOCAL NODE  /  READ-ONLY MODE", id="status")
-
+            yield Input(placeholder="Linux training sandbox / type command", id="lab-input")
+            yield Static("READ-ONLY HOST   ·   ISOLATED COMMAND LAB   ·   1–7 NAVIGATE   ·   Q QUIT", id="status")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -193,8 +148,16 @@ class ForgeApp(App):
             self._lab_commands = []
         self.current_workspace = "overview"
         self.show_workspace("overview")
+        self._live_monitor = LiveMonitor(history=160)
+        self._disk_rates = DiskRates()
+        self._events = AlertJournal()
+        self._net_rx_history = deque(maxlen=160)
+        self._net_tx_history = deque(maxlen=160)
+        self._disk_read_history = deque(maxlen=160)
+        self._disk_write_history = deque(maxlen=160)
+        self._sample_number = 0
         self.refresh_data()
-        self.set_interval(5, self.refresh_data)
+        self.set_interval(1.5, self.refresh_data)
 
     def show_workspace(self, name: str) -> None:
         self.current_workspace = name
@@ -208,37 +171,40 @@ class ForgeApp(App):
             self.set_focus(None)
 
         titles = {
-            "overview": "SYSTEM OVERVIEW",
+            "overview": "SYSTEM HEALTH  /  LIVE MONITORING",
             "processes": "PROCESS INSPECTION",
-            "diagnostics": "SYSTEM DIAGNOSTICS",
-            "engineering": "ENGINEERING WORKSPACE",
+            "diagnostics": "DIAGNOSTICS  /  NEXT ACTIONS",
+            "engineering": "LINUX COMMAND WORKSPACE",
             "drift": "CONFIGURATION DRIFT",
-            "preflight": "DEPLOYMENT PREFLIGHT",
-            "missions": "ENGINEERING MISSIONS",
+            "preflight": "READINESS  /  PREFLIGHT",
+            "missions": "INCIDENT LAB / TRAINING",
         }
 
         self.query_one("#heading", Static).update(titles[name])
 
+        self.query_one("#health").display = name == "overview"
+        self.query_one("#overview-body").display = name == "overview"
         self.query_one("#metrics").display = name == "overview"
-        self.query_one("#details").display = name in ("overview", "diagnostics")
+        self.query_one("#ticker").display = name == "overview"
+
         self.query_one("#table").display = name == "processes"
         self.query_one("#console-scroll").display = name in ("diagnostics", "engineering", "drift", "preflight", "missions")
         self.query_one("#lab-input", Input).display = name == "engineering"
 
         self.query_one("#nav", Static).update(
-            "     ".join(
+            "    ".join(
                 f"[bold white]{i:02d}  {label}[/]"
                 if key == name
                 else f"[#777777]{i:02d}  {label}[/]"
                 for i, (key, label) in enumerate(
                     (
-                        ("overview", "OVERVIEW"),
+                        ("overview", "MONITOR"),
                         ("processes", "PROCESSES"),
                         ("diagnostics", "DIAGNOSTICS"),
                         ("engineering", "ENGINEERING"),
                         ("drift", "DRIFT"),
                         ("preflight", "PREFLIGHT"),
-                        ("missions", "MISSIONS"),
+                        ("missions", "INCIDENTS"),
                     ),
                     start=1,
                 )
@@ -257,73 +223,189 @@ class ForgeApp(App):
             self.render_linux_lab()
 
         self.query_one("#status", Static).update(
-            f"FORGE  /  {name.upper()}   •   R REFRESH   •   Q EXIT"
+            f"{name.upper()}  ·  HOST READ ONLY  ·  TRAINING ISOLATED  ·  1–7 NAVIGATE  ·  Q QUIT"
         )
 
     def refresh_data(self) -> None:
+        """Refresh real host samples. Idle is reported explicitly, never faked."""
         try:
             data = system_snapshot()
-
-            for key in ("cpu", "memory", "disk"):
-                value = float(data[key]["usage_percent"])
-                self.query_one(f"#{key}-value", Static).update(
-                    f"{value:.1f}%"
-                )
-
-                filled = max(0, min(20, round(value / 5)))
-                self.query_one(f"#{key}-bar", Static).update(
-                    "━" * filled + "─" * (20 - filled)
-                )
-
-            self.query_one("#details", Static).update(
-                "[bold white]NODE PROFILE[/]\n\n"
-                f"  HOSTNAME       {data['hostname']}\n"
-                f"  PLATFORM       {data['platform']}\n"
-                f"  KERNEL         {data['kernel']}\n"
-                f"  CPU CORES      {data['cpu']['logical_cores']}\n"
-                f"  PROCESSES      {data['process_count']}\n"
-                f"  UPTIME         {data['uptime_seconds'] // 3600} hours"
+            assessment = self._live_monitor.update(data)
+            self._sample_number += 1
+            frame = ("◐", "◓", "◑", "◒")[self._sample_number % 4]
+            self.query_one("#brand", Static).update(
+                f"[#A7BBAA]{frame}[/]  [bold white]FORGE[/]   [#777777]/  LINUX OPERATIONS[/]"
             )
+            io_read, io_write = self._disk_rates.sample(psutil.disk_io_counters())
+            rx, tx = self._live_monitor.rx_rate, self._live_monitor.tx_rate
+            if rx is not None:
+                self._net_rx_history.append(rx)
+            if tx is not None:
+                self._net_tx_history.append(tx)
+            if io_read is not None:
+                self._disk_read_history.append(io_read)
+            if io_write is not None:
+                self._disk_write_history.append(io_write)
+            self._events.observe(assessment["findings"])
 
-            table = self.query_one("#table", DataTable)
-            table.clear()
+            metrics = {
+                "cpu": f"{data['cpu']['usage_percent']:.1f}%",
+                "memory": f"{data['memory']['usage_percent']:.1f}%",
+                "disk": f"{data['disk']['usage_percent']:.1f}%",
+                "network": format_rate(rx),
+            }
+            for key, value in metrics.items():
+                self.query_one(f"#{key}-value", Static).update(value)
 
-            for proc in top_processes():
-                table.add_row(
-                    str(proc["pid"]),
-                    str(proc["name"]),
-                    f"{proc['cpu_percent']:.1f}",
-                    f"{proc['memory_percent']:.2f}",
+            cpu_history = self._live_monitor.samples['cpu']
+            mem_history = self._live_monitor.samples['memory']
+            cpu_plot = self.query_one('#cpu-plot', Static)
+            mem_plot = self.query_one('#memory-plot', Static)
+            net_plot = self.query_one('#network-plot', Static)
+            cpu_w = max(12, min(110, cpu_plot.size.width - 5))
+            cpu_h = max(2, min(3, cpu_plot.size.height - 1))
+            mem_w = max(12, min(65, mem_plot.size.width - 4))
+            mem_h = max(2, min(7, mem_plot.size.height - 2))
+            net_w = max(12, min(65, net_plot.size.width - 4))
+            net_h = max(2, min(7, net_plot.size.height - 2))
+            cpu_scale = adaptive_ceiling(cpu_history, minimum=5, percent=True)
+            mem_scale = adaptive_ceiling(mem_history, minimum=10, percent=True)
+            net_scale = adaptive_ceiling(self._net_rx_history, minimum=1, percent=False)
+            cpu_plot.update(compact_plot(cpu_history, width=cpu_w, height=cpu_h,
+                                         ceiling=cpu_scale, idle_threshold=0.15))
+            mem_plot.update(compact_plot(mem_history, width=mem_w, height=mem_h,
+                                         ceiling=mem_scale, idle_threshold=0.05))
+            net_plot.update(compact_plot(self._net_rx_history, width=net_w, height=net_h,
+                                         ceiling=net_scale, idle_threshold=0.01))
+            core_usage = psutil.cpu_percent(interval=None, percpu=True)
+            busy = sorted(enumerate(core_usage), key=lambda pair: pair[1], reverse=True)[:3]
+            busy_text = '  '.join(f'C{index}:{usage:.0f}%' for index, usage in busy)
+            self.query_one("#cpu-cores", Static).update(core_activity(core_usage, max(36, self.query_one("#cpu-area").size.width - 5)))
+            self.query_one('#cpu-chart-heading', Static).update(
+                f"CPU ACTIVITY   [#A7BBAA]{data['cpu']['usage_percent']:.1f}%[/]"
+                f"    [#858585]view 0–{cpu_scale:g}%  ·  {len(cpu_history)} samples[/]"
+            )
+            self.query_one('#memory-chart-heading', Static).update(
+                f"MEMORY  {data['memory']['usage_percent']:.1f}%  [#858585]/ {mem_scale:g}% scale[/]"
+            )
+            self.query_one('#network-chart-heading', Static).update(
+                f"RX {format_rate(rx)}   TX {format_rate(tx)}"
+            )
+            state = assessment['health']
+            state_color = '#D99A90' if state == 'CRITICAL' else '#D8C18C' if state == 'ATTENTION' else '#A3C5AB'
+            self.query_one('#health', Static).update(
+                f"[{state_color}]● {state}[/]   ·   {data['hostname']}   ·   {data['platform']} "
+                f"·   {len(core_usage)} logical CPUs   ·   1.5s sampling   ·   {self._sample_number} samples"
+            )
+            processes = top_processes(limit=18)
+            rows = [
+                "[#868686]PID      PROCESS                     CPU     MEM[/]",
+            ]
+            visible = max(5, min(15, self.query_one("#process-panel").size.height - 7))
+            for proc in processes[:visible]:
+                name = str(proc['name']).replace('[','\\[').replace(']','\\]')[:27]
+                rows.append(
+                    f"{proc['pid']:<8} {name:<27} {proc['cpu_percent']:>5.1f}%  {proc['memory_percent']:>5.1f}%"
                 )
+            rows.append("")
+            rows.append(f"[#8E948E]HOTTEST CORES  {busy_text}[/]")
+            try:
+                a, b, c = psutil.getloadavg()
+                rows.append(f"[#8E948E]LOAD AVERAGE   {a:.2f} / {b:.2f} / {c:.2f}[/]")
+            except (OSError, AttributeError):
+                pass
+            self.query_one('#details', Static).update('\n'.join(rows))
 
-            if self.current_workspace == "diagnostics":
+            findings = assessment['findings']
+            info = [
+                f"[{state_color}]● {state}[/]   [#888888]{len(findings)} active[/]",
+                f"CPU  {data['cpu']['usage_percent']:.1f}%    MEM  {data['memory']['usage_percent']:.1f}%",
+                f"DISK {data['disk']['usage_percent']:.1f}%   FREE {data['disk']['free_bytes']/(1024**3):.1f} GiB",
+                f"I/O  R {format_rate(io_read)}  W {format_rate(io_write)}",
+                f"NET  ↓ {format_rate(rx)}  ↑ {format_rate(tx)}",
+                '', '[#999999]RECENT OBSERVATIONS[/]'
+            ]
+            events = self._events.recent(4)
+            info.extend(('  '+e).replace('[','\\[').replace(']','\\]') for e in events)
+            if not events:
+                info.append('  [#9DB8A2]No threshold transitions recorded[/]')
+            info.append('')
+            info.append('[#8B958D]3  Diagnose  ·  4  Linux lab[/]')
+            self.query_one('#live-feed', Static).update('\n'.join(info))
+            self.query_one('#ticker', Static).update(
+                f"LIVE  ·  {self._sample_number} samples   ·   RX {format_rate(rx)}   ·   "
+                f"DISK R {format_rate(io_read)}   ·   1–7 workspaces"
+            )
+            if self.current_workspace == 'processes':
+                table = self.query_one('#table', DataTable)
+                table.clear()
+                for proc in processes:
+                    table.add_row(str(proc['pid']), str(proc['name']),
+                                  f"{proc['cpu_percent']:.1f}", f"{proc['memory_percent']:.2f}")
+            elif self.current_workspace == 'diagnostics':
                 self.show_diagnostics(data)
-
         except Exception as exc:
-            self.query_one("#status", Static).update(
-                f"ERROR: {type(exc).__name__}: {exc}"
+            self.query_one('#status', Static).update(
+                f"MONITORING ERROR: {type(exc).__name__}: {exc}"
             )
 
     def show_diagnostics(self, data):
-        findings = []
-
+        """Present observed resource pressure with investigation and verification steps."""
+        playbooks = {
+            "cpu": (
+                "Sustained CPU contention may delay work. A single sample does not prove a fault.",
+                "top  /  ps aux --sort=-%cpu | head",
+                "Inspect the highest CPU consumers and validate workload expectations.",
+                "Recheck CPU usage over several refreshes after any operator action.",
+            ),
+            "memory": (
+                "Low available memory can affect responsiveness and cause swapping.",
+                "free -h  /  ps aux --sort=-%mem | head",
+                "Review memory-heavy processes and application logs before intervening.",
+                "Recheck available memory and process consumption.",
+            ),
+            "disk": (
+                "Low free disk capacity can disrupt writes, logs and applications.",
+                "df -h  /  du -sh /var/log/*",
+                "Identify growth and review candidates; do not delete files automatically.",
+                "Recheck disk space after a separately approved cleanup.",
+            ),
+        }
+        lines = [
+            "[bold white]SYSTEM DIAGNOSTICS  /  READ-ONLY[/]",
+            "[#858585]Live measurements are observations, not proof of root cause.[/]",
+            "",
+        ]
+        warnings = 0
         for key in ("cpu", "memory", "disk"):
-            value = data[key]["usage_percent"]
-
-            if value >= 90:
-                findings.append(f"CRITICAL  {key.upper()}  {value:.1f}%")
-            elif value >= 75:
-                findings.append(f"WARNING   {key.upper()}  {value:.1f}%")
-
-        if not findings:
-            findings = ["No resource threshold warnings detected."]
-
-        self.query_one("#console", Static).update(
-            "[bold white]DIAGNOSTIC RESULTS[/]\n\n"
-            + "\n\n".join(findings)
-            + "\n\n[#777777]Warning ≥75%  /  Critical ≥90%[/]"
-        )
-
+            value = float(data[key]["usage_percent"])
+            level = "CRITICAL" if value >= 90 else "WARNING" if value >= 75 else "NORMAL"
+            color = "#EE9B92" if level == "CRITICAL" else "#DCC18A" if level == "WARNING" else "#90C7AE"
+            lines.append(f"[{color}]{level:<8}[/] {key.upper():<7} {value:.1f}%")
+            if level != "NORMAL":
+                warnings += 1
+                why, inspect, action, verify = playbooks[key]
+                lines.extend([
+                    f"  Context: {why}",
+                    f"  Inspect on HOST: {inspect}",
+                    f"  Next action: {action}",
+                    f"  Verify: {verify}",
+                    "",
+                ])
+        if not warnings:
+            lines.extend([
+                "",
+                "[bold #90C7AE]NO RESOURCE PRESSURE THRESHOLDS TRIGGERED[/]",
+                "Measurements are below the configured warning threshold.",
+                "Use Processes (2) to inspect current workloads or Preflight (6) to check readiness.",
+            ])
+        lines.extend([
+            "",
+            "[#787878]Warning >=75%  /  Critical >=90%  /  Refresh every 1.5s[/]",
+            "[#787878]Suggested commands are for the REAL Linux host; FORGE's command lab is isolated.[/]",
+            "[#787878]No host command is executed by this diagnostics screen.[/]",
+        ])
+        self.query_one("#console", Static).update("\n".join(lines))
 
     def render_drift(self):
         try:
@@ -332,13 +414,13 @@ class ForgeApp(App):
 
             if status == "no_baseline":
                 message = (
-                    "NO BASELINE EXISTS\\n\\n"
+                    "NO BASELINE EXISTS\n\n"
                     "Press B to establish the current configuration "
                     "as the approved baseline."
                 )
             elif status == "clean":
                 message = (
-                    "CLEAN / NO CONFIGURATION DRIFT\\n\\n"
+                    "CLEAN / NO CONFIGURATION DRIFT\n\n"
                     f"Verified {result['checked_files']} tracked files."
                 )
             else:
@@ -347,14 +429,14 @@ class ForgeApp(App):
                     for item in result["changes"]
                 ]
                 message = (
-                    "CONFIGURATION CHANGES DETECTED\\n\\n"
-                    + "\\n".join(lines)
+                    "CONFIGURATION CHANGES DETECTED\n\n"
+                    + "\n".join(lines)
                 )
 
             self.query_one("#console", Static).update(
-                "[bold white]CONFIGURATION INTEGRITY[/]\\n\\n"
+                "[bold white]CONFIGURATION INTEGRITY[/]\n\n"
                 + message
-                + "\\n\\n[#888888]"
+                + "\n\n[#888888]"
                   "B  CREATE BASELINE    C  CHECK DRIFT"
                   "[/]"
             )
@@ -416,7 +498,7 @@ class ForgeApp(App):
             ])
 
             self.query_one("#console", Static).update(
-                "\\n".join(lines)
+                "\n".join(lines)
             )
 
         except Exception as exc:
